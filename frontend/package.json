@@ -1,0 +1,62 @@
+{
+  "name": "rate-engine-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --skipLibCheck && vite build",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test:rdl": "tsx ../tests/rdl-test.ts",
+    "test:ui": "vitest run --passWithNoTests",
+    "test": "npm run test:rdl && npm run test:ui"
+  },
+  "dependencies": {
+    "@aws-amplify/ui-react": "^6.13.1",
+    "@aws-sdk/client-cognito-identity-provider": "^3.946.0",
+    "@fontsource-variable/geist": "^5.2.8",
+    "@monaco-editor/react": "^4.7.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "aws-amplify": "^6.15.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^1.14.0",
+    "radix-ui": "^1.4.3",
+    "react": "^19.2.5",
+    "react-day-picker": "^9.14.0",
+    "react-dom": "^19.2.5",
+    "react-router-dom": "^6.30.2",
+    "shadcn": "^4.6.0",
+    "tailwind-merge": "^3.5.0",
+    "tw-animate-css": "^1.4.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.4.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.4",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^16.4.0",
+    "jsdom": "^27.1.0",
+    "tailwindcss": "^4.2.4",
+    "tsx": "^4.7.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.0",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.9"
+  },
+  "description": "React admin UI for authoring and testing utility rate configurations, built with Vite, TypeScript, shadcn/ui, and Tailwind CSS.",
+  "keywords": [],
+  "author": "",
+  "license": "MIT-0",
+  "overrides": {
+    "esbuild": "0.28.1"
+  }
+}

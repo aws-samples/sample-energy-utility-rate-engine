@@ -1,0 +1,145 @@
+{
+  "description": "Full utility billing calculation - used for system testing",
+  "scenario": "TEST_BILLING",
+  "rdl_lines": [
+    {"code": "///Initialization", "order": 1},
+    {"code": "total = 0", "order": 2},
+    {"code": "subtotal = 0", "order": 3},
+
+    {"code": "///Customer Charge", "order": 10},
+    {"code": "customer_charge = GET_FACTOR(INPUT.RATE, \"CUSTOMER_CHARGE\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 11},
+    {"code": "customer_charge = ROUND(customer_charge, 2)", "order": 12},
+    {"code": "subtotal = subtotal + customer_charge", "order": 13},
+
+    {"code": "///Energy Charge - Tiered", "order": 20},
+    {"code": "tier1_rate = GET_FACTOR(INPUT.RATE, \"ENERGY_CHARGE\", \"0\", \"\", \"\", INPUT.BILL_DATE)", "order": 21},
+    {"code": "tier2_rate = GET_FACTOR(INPUT.RATE, \"ENERGY_CHARGE\", \"1000\", \"\", \"\", INPUT.BILL_DATE)", "order": 22},
+    {"code": "energy_charge = CALCULATE_TIERED(INPUT.KWH, 1000, tier1_rate, tier2_rate)", "order": 23},
+    {"code": "energy_charge = ROUND(energy_charge, 2)", "order": 24},
+    {"code": "subtotal = subtotal + energy_charge", "order": 25},
+
+    {"code": "///Fuel Charge", "order": 30},
+    {"code": "fuel_rate = GET_FACTOR(INPUT.RATE, \"FUEL_CHARGE\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 31},
+    {"code": "fuel_charge = INPUT.KWH * fuel_rate", "order": 32},
+    {"code": "fuel_charge = ROUND(fuel_charge, 2)", "order": 33},
+    {"code": "subtotal = subtotal + fuel_charge", "order": 34},
+
+    {"code": "///Demand Charge", "order": 40},
+    {"code": "demand_charge = 0", "order": 41},
+    {"code": "IF INPUT.KWD > 0", "order": 42},
+    {"code": "demand_rate = GET_FACTOR(INPUT.RATE, \"DEMAND_CHARGE\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 43},
+    {"code": "demand_cap = GET_FACTOR(INPUT.RATE, \"DEMAND_CAP\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 44},
+    {"code": "raw_demand = INPUT.KWD * demand_rate", "order": 45},
+    {"code": "demand_charge = MIN(raw_demand, demand_cap)", "order": 46},
+    {"code": "demand_charge = ROUND(demand_charge, 2)", "order": 47},
+    {"code": "subtotal = subtotal + demand_charge", "order": 48},
+    {"code": "ENDIF", "order": 49},
+
+    {"code": "///Net Metering Credit", "order": 50},
+    {"code": "nem_credit = 0", "order": 51},
+    {"code": "IF INPUT.NET_METERING == \"NEM\"", "order": 52},
+    {"code": "IF INPUT.KWH_GENERATED > 0", "order": 53},
+    {"code": "nem_rate = GET_FACTOR(INPUT.RATE, \"NEM_EXPORT_CREDIT\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 54},
+    {"code": "nem_credit = INPUT.KWH_GENERATED * nem_rate", "order": 55},
+    {"code": "nem_credit = ABS(nem_credit)", "order": 56},
+    {"code": "nem_credit = ROUND(nem_credit, 2)", "order": 57},
+    {"code": "subtotal = subtotal - nem_credit", "order": 58},
+    {"code": "ENDIF", "order": 59},
+    {"code": "ENDIF", "order": 60},
+
+    {"code": "///Franchise Fee", "order": 70},
+    {"code": "franchise_rate = GET_FACTOR(\"FRANCHISE\", INPUT.LOCALITY, \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 71},
+    {"code": "franchise_fee = subtotal * franchise_rate", "order": 72},
+    {"code": "franchise_fee = ROUND(franchise_fee, 2)", "order": 73},
+    {"code": "subtotal = subtotal + franchise_fee", "order": 74},
+
+    {"code": "///Taxes", "order": 80},
+    {"code": "sales_tax = 0", "order": 81},
+    {"code": "gross_receipts_tax = 0", "order": 82},
+    {"code": "tax_exempt = [\"GOVERNMENT\", \"NONPROFIT\", \"RELIGIOUS\"]", "order": 83},
+    {"code": "IF INPUT.TAX_CLASS IN tax_exempt", "order": 84},
+    {"code": "total = subtotal", "order": 85},
+    {"code": "ELSE", "order": 86},
+    {"code": "sales_tax_rate = GET_FACTOR(\"STATE_SALES_TAX\", \"\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 87},
+    {"code": "sales_tax = subtotal * sales_tax_rate", "order": 88},
+    {"code": "sales_tax = ROUND(sales_tax, 2)", "order": 89},
+    {"code": "grt_rate = GET_FACTOR(\"GROSS_RECEIPTS_TAX\", \"\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 90},
+    {"code": "gross_receipts_tax = subtotal * grt_rate", "order": 91},
+    {"code": "gross_receipts_tax = ROUND(gross_receipts_tax, 2)", "order": 92},
+    {"code": "total = subtotal + sales_tax + gross_receipts_tax", "order": 93},
+    {"code": "ENDIF", "order": 94},
+
+    {"code": "///Minimum Bill", "order": 100},
+    {"code": "minimum_bill = GET_FACTOR(INPUT.RATE, \"MINIMUM_BILL\", \"\", \"\", \"\", INPUT.BILL_DATE)", "order": 101},
+    {"code": "total = MAX(total, minimum_bill)", "order": 102},
+
+    {"code": "///Final Rounding", "order": 110},
+    {"code": "total = ROUND_CENTS(total, \"HALF_UP\")", "order": 111},
+
+    {"code": "///Output", "order": 120},
+    {"code": "OUTPUT.INSERT(\"Base Charges\", \"customer_charge\", customer_charge)", "order": 121},
+    {"code": "OUTPUT.INSERT(\"Energy Charges\", \"energy_charge\", energy_charge)", "order": 122},
+    {"code": "OUTPUT.INSERT(\"Energy Charges\", \"fuel_charge\", fuel_charge)", "order": 123},
+    {"code": "OUTPUT.INSERT(\"Demand Charges\", \"demand_charge\", demand_charge)", "order": 124},
+    {"code": "OUTPUT.INSERT(\"Net Metering\", \"nem_credit\", nem_credit)", "order": 125},
+    {"code": "OUTPUT.INSERT(\"Fees\", \"franchise_fee\", franchise_fee)", "order": 126},
+    {"code": "OUTPUT.INSERT(\"Taxes\", \"sales_tax\", sales_tax)", "order": 127},
+    {"code": "OUTPUT.INSERT(\"Taxes\", \"gross_receipts_tax\", gross_receipts_tax)", "order": 128},
+    {"code": "OUTPUT.INSERT(\"Totals\", \"subtotal\", subtotal)", "order": 129},
+    {"code": "OUTPUT.INSERT(\"Totals\", \"total\", total)", "order": 130}
+  ],
+  "input_validation": [
+    {"name": "KWH", "dataType": "number", "required": true},
+    {"name": "KWD", "dataType": "number", "required": false},
+    {"name": "RATE", "dataType": "string", "required": true},
+    {"name": "BILL_DATE", "dataType": "date", "required": true},
+    {"name": "LOCALITY", "dataType": "string", "required": true},
+    {"name": "TAX_CLASS", "dataType": "string", "required": false},
+    {"name": "KWH_GENERATED", "dataType": "number", "required": false},
+    {"name": "NET_METERING", "dataType": "string", "required": false}
+  ],
+  "custom_functions": [
+    {
+      "name": "GET_FACTOR",
+      "rustCode": "fn get_factor(key1: &str, key2: &str, key3: &str, key4: &str, key5: &str, date: &str) -> f64 {\n    load_factor_cache_once();\n    let parts: Vec<&str> = vec![key1, key2, key3, key4, key5].into_iter().filter(|s| !s.is_empty()).collect();\n    let lookup_key = parts.join(\"#\");\n    FACTOR_CACHE.with(|cache| {\n        cache.borrow().get(&lookup_key).and_then(|entries| {\n            entries.iter().find(|f| date >= f.start_date.as_str() && date <= f.end_date.as_str()).map(|f| f.value)\n        }).unwrap_or(0.0)\n    })\n}",
+      "parameters": [
+        {"name": "key1", "type": "string"},
+        {"name": "key2", "type": "string"},
+        {"name": "key3", "type": "string"},
+        {"name": "key4", "type": "string"},
+        {"name": "key5", "type": "string"},
+        {"name": "date", "type": "date"}
+      ]
+    },
+    {
+      "name": "ROUND",
+      "rustCode": "fn round_decimals(value: f64, decimals: f64) -> f64 {\n    let m = 10_f64.powf(decimals);\n    (value * m).round() / m\n}",
+      "parameters": [{"name": "value", "type": "f64"}, {"name": "decimals", "type": "f64"}]
+    },
+    {
+      "name": "ROUND_CENTS",
+      "rustCode": "fn round_cents(amount: f64, rule: &str) -> f64 {\n    let scaled = amount * 100.0;\n    let rounded = match rule {\n        \"HALF_UP\" => scaled.round(),\n        \"DOWN\" => scaled.floor(),\n        \"UP\" => scaled.ceil(),\n        _ => scaled.round()\n    };\n    rounded / 100.0\n}",
+      "parameters": [{"name": "amount", "type": "f64"}, {"name": "rule", "type": "string"}]
+    },
+    {
+      "name": "CALCULATE_TIERED",
+      "rustCode": "fn calculate_tiered(usage: f64, tier1_limit: f64, tier1_rate: f64, tier2_rate: f64) -> f64 {\n    if usage <= tier1_limit { usage * tier1_rate } else { (tier1_limit * tier1_rate) + ((usage - tier1_limit) * tier2_rate) }\n}",
+      "parameters": [{"name": "usage", "type": "f64"}, {"name": "tier1_limit", "type": "f64"}, {"name": "tier1_rate", "type": "f64"}, {"name": "tier2_rate", "type": "f64"}]
+    },
+    {
+      "name": "MIN",
+      "rustCode": "fn min_f64(a: f64, b: f64) -> f64 { if a < b { a } else { b } }",
+      "parameters": [{"name": "a", "type": "f64"}, {"name": "b", "type": "f64"}]
+    },
+    {
+      "name": "MAX",
+      "rustCode": "fn max_f64(a: f64, b: f64) -> f64 { if a > b { a } else { b } }",
+      "parameters": [{"name": "a", "type": "f64"}, {"name": "b", "type": "f64"}]
+    },
+    {
+      "name": "ABS",
+      "rustCode": "fn abs_f64(value: f64) -> f64 { value.abs() }",
+      "parameters": [{"name": "value", "type": "f64"}]
+    }
+  ]
+}

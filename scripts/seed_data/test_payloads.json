@@ -1,0 +1,231 @@
+[
+  {
+    "scenario": "DEFAULT",
+    "name": "Simple Residential",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "RES",
+          "KWH": 1000,
+          "KWD": 0,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Residential with Net Metering",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "RES",
+          "KWH": 800,
+          "KWD": 0,
+          "KWH_GENERATED": 300,
+          "NET_METERING": "NEM",
+          "BILL_DATE": "2025-07-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Full Residential",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "RES",
+          "KWH": 1500,
+          "KWD": 10,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Commercial",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "COM",
+          "KWH": 50000,
+          "KWD": 150,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "SUBURBAN",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Commercial with Net Metering",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "COM",
+          "KWH": 10000,
+          "KWD": 50,
+          "KWH_GENERATED": 2000,
+          "NET_METERING": "NEM",
+          "BILL_DATE": "2025-08-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Commercial - Demand Ratchet + Power Factor",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "COM",
+          "KWH": 40000,
+          "KWD": 40,
+          "KWD_HISTORY": "[100.0, 120.0, 90.0]",
+          "POWER_FACTOR": 0.85,
+          "BILL_DATE": "2025-08-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "SUBURBAN",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Commercial - Critical Peak Day + Riders",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "COM",
+          "KWH": 50000,
+          "KWD": 150,
+          "BILL_DATE": "2025-07-18",
+          "EVENT_DATES": "[\"2025-07-18\"]",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": ["STORM_RECOVERY", "ENERGY_EFFICIENCY", "ENVIRONMENTAL"]
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Multi-Input Batch",
+    "payload": {
+      "overrides": {},
+      "inputs": [
+        {
+          "RATE": "RES",
+          "KWH": 500,
+          "KWD": 0,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        },
+        {
+          "RATE": "RES",
+          "KWH": 1200,
+          "KWD": 5,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "SUBURBAN",
+          "RIDERS": []
+        },
+        {
+          "RATE": "COM",
+          "KWH": 25000,
+          "KWD": 100,
+          "BILL_DATE": "2025-01-15",
+          "TAX_CLASS": "GOVERNMENT",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Residential - Future Rates (+1 Year)",
+    "payload": {
+      "overrides": {
+        "BILL_DATE_OFFSET_YEARS": 1
+      },
+      "inputs": [
+        {
+          "RATE": "RES",
+          "KWH": 1000,
+          "KWD": 0,
+          "BILL_DATE": "2025-06-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "METRO",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "scenario": "DEFAULT",
+    "name": "Commercial - Future Rates (Specific Date)",
+    "payload": {
+      "overrides": {
+        "BILL_DATE": "2026-06-15"
+      },
+      "inputs": [
+        {
+          "RATE": "COM",
+          "KWH": 50000,
+          "KWD": 150,
+          "BILL_DATE": "2025-06-15",
+          "TAX_CLASS": "TAXABLE",
+          "LOCALITY": "SUBURBAN",
+          "RIDERS": []
+        }
+      ]
+    },
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  }
+]

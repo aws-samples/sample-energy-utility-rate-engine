@@ -1,0 +1,28 @@
+{
+  "name": "rate-engine-cdk",
+  "license": "MIT-0",
+  "version": "0.1.0",
+  "bin": {
+    "rate-engine": "bin/rate-engine.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.0",
+    "aws-cdk": "2.1128.1",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.3.3",
+    "vitest": "^1.4.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.260.0",
+    "constructs": "^10.0.0",
+    "source-map-support": "^0.5.21"
+  }
+}

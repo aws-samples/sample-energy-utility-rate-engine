@@ -1,0 +1,15 @@
+// Runtime configuration for the Rate Engine frontend.
+//
+// This file is git-ignored because `scripts/deploy.sh` regenerates it with the
+// live Cognito User Pool / Client IDs after each deployment. For local
+// development before a deploy, copy this template to `config.js`:
+//
+//   cp frontend/public/config.js.example frontend/public/config.js
+//
+// then fill in the values from your deployed stack's CloudFormation outputs.
+window.RATE_ENGINE_CONFIG = {
+  API_ENDPOINT: "",
+  REGION: "",
+  USER_POOL_ID: "",
+  USER_POOL_CLIENT_ID: ""
+};

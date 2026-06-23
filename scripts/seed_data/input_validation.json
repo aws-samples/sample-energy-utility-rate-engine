@@ -1,0 +1,110 @@
+[
+  {
+    "name": "KWH",
+    "description": "Total kilowatt hours consumed from the grid",
+    "dataType": "number",
+    "required": true,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "KWD",
+    "description": "Peak kilowatt demand",
+    "dataType": "number",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "RATE",
+    "description": "Rate code (e.g., RES, COM)",
+    "dataType": "string",
+    "required": true,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "BILL_DATE",
+    "description": "Billing date for rate lookups",
+    "dataType": "date",
+    "required": true,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "RIDERS",
+    "description": "Array of rider codes applied to this account",
+    "dataType": "array",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "LOCALITY",
+    "description": "Locality identifier for franchise fees",
+    "dataType": "string",
+    "required": true,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "TAX_CLASS",
+    "description": "Tax classification (STANDARD, GOVERNMENT, NONPROFIT, RELIGIOUS)",
+    "dataType": "string",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "KWH_GENERATED",
+    "description": "Kilowatt hours exported to the grid (net metering)",
+    "dataType": "number",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "NET_METERING",
+    "description": "Net metering program (NEM for enrolled customers, empty otherwise)",
+    "dataType": "string",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "KWD_HISTORY",
+    "description": "JSON array of prior-period peak demands (kW) for the demand-ratchet calc, e.g. \"[120.0, 135.5, 110.0]\". Caller supplies the trailing window; the engine performs no historical lookups.",
+    "dataType": "string",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "POWER_FACTOR",
+    "description": "Customer's actual power factor (0.0-1.0). When below the tariff target, the demand charge is adjusted upward. 0 (default) means no adjustment.",
+    "dataType": "number",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "EVENT_DATES",
+    "description": "JSON array of critical-peak event dates (YYYY-MM-DD) supplied by the caller, e.g. \"[\\\"2025-07-18\\\"]\". If the bill date matches, a CPP demand adder applies.",
+    "dataType": "string",
+    "required": false,
+    "scenario": "DEFAULT",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  }
+]

@@ -1,0 +1,605 @@
+use aws_config::BehaviorVersion;
+use aws_sdk_dynamodb::Client as DynamoDbClient;
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::primitives::ByteStream;
+use lambda_runtime::{service_fn, Error, LambdaEvent};
+use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::env;
+use std::io::{BufRead, BufReader};
+use std::time::{Duration, Instant};
+
+// Global clients - initialized once at cold start
+static DB_CLIENT: OnceCell<DynamoDbClient> = OnceCell::new();
+static S3_CLIENT: OnceCell<S3Client> = OnceCell::new();
+static FACTORS_TABLE_NAME: OnceCell<String> = OnceCell::new();
+static SCENARIO: OnceCell<String> = OnceCell::new();
+
+// Factor cache entry structure
+#[derive(Debug, Clone)]
+struct FactorEntry {
+    start_date: String,
+    end_date: String,
+    value: f64,
+}
+
+// Cache TTL: 5 minutes - ensures provisioned concurrency instances get fresh data periodically
+const CACHE_TTL_SECS: u64 = 300;
+
+// Factor cache - HashMap for O(1) key lookup, with TTL-based expiration
+thread_local! {
+    static FACTOR_CACHE: std::cell::RefCell<HashMap<String, Vec<FactorEntry>>> = std::cell::RefCell::new(HashMap::new());
+    static CACHE_LOADED: std::cell::RefCell<bool> = std::cell::RefCell::new(false);
+    static CACHE_TIMESTAMP: std::cell::RefCell<Option<Instant>> = std::cell::RefCell::new(None);
+}
+
+{{ input_struct }}
+
+/// Override inputs - batch-level parameters that apply to all calculations
+/// These are accessed in RDL via OVERRIDE.* (e.g., OVERRIDE.BILL_DATE)
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub struct OverrideInput {
+    #[serde(rename = "BILL_DATE")]
+    pub bill_date: Option<String>,
+    #[serde(rename = "BILL_DATE_OFFSET_YEARS")]
+    pub bill_date_offset_years: Option<f64>,
+    #[serde(rename = "BILL_DATE_OFFSET_MONTHS")]
+    pub bill_date_offset_months: Option<f64>,
+}
+
+/// Request wrapper for inputs with optional overrides
+#[derive(Debug, Deserialize)]
+pub struct RequestWithOverrides {
+    #[serde(default)]
+    pub overrides: OverrideInput,
+    pub inputs: Vec<Value>,
+}
+
+/// Output item with category grouping for structured bill display
+#[derive(Debug, Clone, Serialize)]
+pub struct OutputItem {
+    pub category: String,
+    pub field: String,
+    pub value: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CalculationResult {
+    pub status: String,
+    pub output: Vec<OutputItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub debug: HashMap<String, Value>,
+    pub request: Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchResult {
+    pub input: Value,
+    pub result: CalculationResult,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BatchResponse {
+    pub results: Vec<BatchResult>,
+}
+
+/// API Gateway Lambda Proxy response format
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiGatewayResponse {
+    pub status_code: u16,
+    pub headers: HashMap<String, String>,
+    pub body: String,
+}
+
+impl ApiGatewayResponse {
+    fn success(body: &str) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("Access-Control-Allow-Origin".to_string(), "*".to_string());
+        headers.insert("Access-Control-Allow-Headers".to_string(), "Content-Type,Authorization".to_string());
+
+        ApiGatewayResponse {
+            status_code: 200,
+            headers,
+            body: body.to_string(),
+        }
+    }
+
+    fn error(status_code: u16, message: &str) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "application/json".to_string());
+        headers.insert("Access-Control-Allow-Origin".to_string(), "*".to_string());
+
+        let body = serde_json::json!({ "error": message }).to_string();
+
+        ApiGatewayResponse {
+            status_code,
+            headers,
+            body,
+        }
+    }
+}
+
+/// S3 batch processing input - Lambda reads from S3 and writes results to S3
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3BatchInput {
+    pub s3_input: String,   // s3://bucket/path/input.jsonl
+    pub s3_output: String,  // s3://bucket/path/output.jsonl
+    #[serde(default)]
+    pub overrides: OverrideInput,  // Optional overrides applied to all records
+}
+
+/// S3 batch processing result summary
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S3BatchSummary {
+    pub status: String,
+    pub records_processed: usize,
+    pub records_succeeded: usize,
+    pub records_failed: usize,
+    pub s3_output: String,
+}
+
+/// Parse S3 URI into bucket and key
+fn parse_s3_uri(uri: &str) -> Option<(String, String)> {
+    if !uri.starts_with("s3://") {
+        return None;
+    }
+    let path = &uri[5..];
+    let slash_pos = path.find('/')?;
+    let bucket = path[..slash_pos].to_string();
+    let key = path[slash_pos + 1..].to_string();
+    Some((bucket, key))
+}
+
+/// Process S3 batch - read JSONL from S3, process each line, write results to S3
+async fn process_s3_batch(input: S3BatchInput) -> Result<S3BatchSummary, String> {
+    let s3_client = S3_CLIENT.get().ok_or("S3 client not initialized")?;
+
+    // Force fresh cache reload for batch processing
+    // This ensures each batch job gets the latest factor data, critical for:
+    // - Provisioned concurrency instances that may have stale cached data
+    // - Long-running batch jobs where data may have been updated
+    clear_factor_cache();
+
+    // Parse input and output URIs
+    let (input_bucket, input_key) = parse_s3_uri(&input.s3_input)
+        .ok_or_else(|| format!("Invalid S3 input URI: {}", input.s3_input))?;
+    let (output_bucket, output_key) = parse_s3_uri(&input.s3_output)
+        .ok_or_else(|| format!("Invalid S3 output URI: {}", input.s3_output))?;
+
+    tracing::info!("Processing S3 batch: {} -> {}", input.s3_input, input.s3_output);
+
+    // Read input file from S3
+    let get_result = s3_client
+        .get_object()
+        .bucket(&input_bucket)
+        .key(&input_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to read from S3: {}", e))?;
+
+    let body_bytes = get_result.body
+        .collect()
+        .await
+        .map_err(|e| format!("Failed to read S3 body: {}", e))?
+        .into_bytes();
+
+    // Process each line as JSONL
+    let reader = BufReader::new(body_bytes.as_ref());
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut records_processed = 0;
+    let mut records_succeeded = 0;
+    let mut records_failed = 0;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        records_processed += 1;
+
+        // Parse and process the input with overrides
+        let result = match serde_json::from_str::<Value>(line) {
+            Ok(input_value) => {
+                let batch_result = process_single_input(input_value, &input.overrides);
+                if batch_result.result.status == "success" {
+                    records_succeeded += 1;
+                } else {
+                    records_failed += 1;
+                }
+                batch_result
+            }
+            Err(e) => {
+                records_failed += 1;
+                BatchResult {
+                    input: Value::String(line.to_string()),
+                    result: CalculationResult {
+                        status: "error".to_string(),
+                        output: Vec::new(),
+                        errors: vec![format!("Failed to parse JSON: {}", e)],
+                        debug: HashMap::new(),
+                        request: Value::Null,
+                    },
+                }
+            }
+        };
+
+        // Serialize result as JSONL line
+        let result_json = serde_json::to_string(&result)
+            .map_err(|e| format!("Failed to serialize result: {}", e))?;
+        output_lines.push(result_json);
+    }
+
+    // Write output file to S3
+    let output_body = output_lines.join("\n");
+    s3_client
+        .put_object()
+        .bucket(&output_bucket)
+        .key(&output_key)
+        .body(ByteStream::from(output_body.into_bytes()))
+        .content_type("application/x-ndjson")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to write to S3: {}", e))?;
+
+    tracing::info!(
+        "Batch complete: {} processed, {} succeeded, {} failed",
+        records_processed, records_succeeded, records_failed
+    );
+
+    Ok(S3BatchSummary {
+        status: if records_failed == 0 { "success".to_string() } else { "partial".to_string() },
+        records_processed,
+        records_succeeded,
+        records_failed,
+        s3_output: input.s3_output,
+    })
+}
+
+// Helper module with DynamoDB lookup functions
+// These implementations come from custom_functions in DynamoDB and are fully editable
+mod helpers {
+    #[allow(unused_imports)]
+    use super::*;
+
+    // Built-in helper for rounding to specific precision (used by ROUND() in RDL)
+    pub fn round_decimal(value: f64, precision: u32) -> f64 {
+        let multiplier = 10_f64.powi(precision as i32);
+        (value * multiplier).round() / multiplier
+    }
+
+    // Custom functions from DynamoDB - editable by utilities to match their data structures
+    {{ custom_functions }}
+}
+
+fn calculate_rate(input: &CalculationInput, overrides: &OverrideInput, request_json: Value) -> CalculationResult {
+    // Initialize output, errors, and debug - users add to these via RDL
+    let mut output: Vec<OutputItem> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
+    let mut debug: HashMap<String, Value> = HashMap::new();
+
+    // Extract input values (from input_validation in DynamoDB)
+{{ input_extractions }}
+
+    // Extract override values - accessible via OVERRIDE.* in RDL
+    let override_bill_date: String = overrides.bill_date.clone().unwrap_or_default();
+    let override_bill_date_offset_years: f64 = overrides.bill_date_offset_years.unwrap_or(0.0);
+    let override_bill_date_offset_months: f64 = overrides.bill_date_offset_months.unwrap_or(0.0);
+
+    // Pre-declare variables used across scopes
+{{ outer_var_declarations }}
+
+    // RDL-generated calculation logic
+{{ statements }}
+
+    // Determine status based on errors
+    let status = if errors.is_empty() { "success" } else { "warning" }.to_string();
+
+    // Return result with original request
+    CalculationResult {
+        status,
+        output,
+        errors,
+        debug,
+        request: request_json,
+    }
+}
+
+/// Clear the factor cache - used for forced reloads (e.g., S3 batch mode)
+fn clear_factor_cache() {
+    FACTOR_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+    CACHE_LOADED.with(|loaded| {
+        *loaded.borrow_mut() = false;
+    });
+    CACHE_TIMESTAMP.with(|ts| {
+        *ts.borrow_mut() = None;
+    });
+    tracing::info!("Factor cache cleared for fresh reload");
+}
+
+/// Check if cache has expired based on TTL
+fn is_cache_expired() -> bool {
+    CACHE_TIMESTAMP.with(|ts| {
+        if let Some(timestamp) = *ts.borrow() {
+            timestamp.elapsed() > Duration::from_secs(CACHE_TTL_SECS)
+        } else {
+            false // No timestamp means not loaded yet
+        }
+    })
+}
+
+/// Load all factors for the scenario into cache
+/// Uses TTL-based expiration - cache automatically refreshes after 5 minutes
+fn load_factor_cache_once() {
+    // Check if cache expired (TTL-based invalidation for provisioned concurrency)
+    if is_cache_expired() {
+        tracing::info!("Factor cache TTL expired ({}s), reloading...", CACHE_TTL_SECS);
+        clear_factor_cache();
+    }
+
+    // Check if already loaded and not expired
+    let already_loaded = CACHE_LOADED.with(|loaded| *loaded.borrow());
+    if already_loaded {
+        return;
+    }
+
+    let client = DB_CLIENT.get().expect("DynamoDB client not initialized");
+    let table = FACTORS_TABLE_NAME.get().expect("Factors table name not initialized").clone();
+    let scenario = SCENARIO.get().expect("Scenario not initialized");
+
+    // Build HashMap grouped by lookup_key for O(1) lookups
+    let mut factor_map: HashMap<String, Vec<FactorEntry>> = HashMap::new();
+
+    // Use futures::executor to run async code from sync context
+    let result = futures::executor::block_on(async {
+        client
+            .query()
+            .table_name(&table)
+            .key_condition_expression("scenario = :scenario")
+            .expression_attribute_values(":scenario", aws_sdk_dynamodb::types::AttributeValue::S(scenario.to_string()))
+            .send()
+            .await
+    });
+
+    match result {
+        Ok(output) => {
+            if let Some(items) = output.items {
+                for item in items {
+                    // Extract factor_key (format: key1#key2#key3#key4#key5#start_date)
+                    let factor_key = item.get("factor_key")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string());
+
+                    let start_date = item.get("start_date")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "0000-00-00".to_string());
+
+                    let end_date = item.get("end_date")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "9999-12-31".to_string());
+
+                    let value = item.get("value")
+                        .and_then(|v| v.as_n().ok())
+                        .and_then(|n| n.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+
+                    if let Some(factor_key_str) = factor_key {
+                        // Factor key in DB: key1#key2#...#start_date
+                        // Strip the trailing #start_date to get lookup key
+                        let lookup_key = if let Some(last_hash) = factor_key_str.rfind('#') {
+                            factor_key_str[..last_hash].to_string()
+                        } else {
+                            factor_key_str
+                        };
+                        // Group factors by lookup_key for O(1) access
+                        factor_map
+                            .entry(lookup_key)
+                            .or_insert_with(Vec::new)
+                            .push(FactorEntry {
+                                start_date,
+                                end_date,
+                                value,
+                            });
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to load factors from Factors table: {}", e);
+        }
+    }
+
+    // Store factor map in cache
+    let factor_count: usize = factor_map.values().map(|v| v.len()).sum();
+    FACTOR_CACHE.with(|cache| {
+        *cache.borrow_mut() = factor_map;
+    });
+
+    // Mark as loaded and record timestamp for TTL tracking
+    CACHE_LOADED.with(|loaded| {
+        *loaded.borrow_mut() = true;
+    });
+    CACHE_TIMESTAMP.with(|ts| {
+        *ts.borrow_mut() = Some(Instant::now());
+    });
+
+    tracing::info!("Loaded {} factors into cache for scenario {} (TTL: {}s)",
+        factor_count,
+        scenario,
+        CACHE_TTL_SECS);
+}
+
+fn process_single_input(input_value: Value, overrides: &OverrideInput) -> BatchResult {
+    let request_json = input_value.clone();
+
+    // Parse input
+    let input: CalculationInput = match serde_json::from_value(input_value.clone()) {
+        Ok(input) => input,
+        Err(e) => {
+            return BatchResult {
+                input: input_value,
+                result: CalculationResult {
+                    status: "error".to_string(),
+                    output: Vec::new(),
+                    errors: vec![format!("Failed to parse input: {}", e)],
+                    debug: HashMap::new(),
+                    request: request_json,
+                },
+            };
+        }
+    };
+
+    // Clone overrides for the closure
+    let overrides_clone = overrides.clone();
+
+    // Run calculation and catch panics
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        calculate_rate(&input, &overrides_clone, request_json.clone())
+    }));
+
+    match result {
+        Ok(calc_result) => BatchResult {
+            input: input_value,
+            result: calc_result,
+        },
+        Err(e) => {
+            let error_msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Unknown panic occurred during calculation".to_string()
+            };
+
+            BatchResult {
+                input: input_value,
+                result: CalculationResult {
+                    status: "error".to_string(),
+                    output: Vec::new(),
+                    errors: vec![error_msg],
+                    debug: HashMap::new(),
+                    request: request_json,
+                },
+            }
+        }
+    }
+}
+
+async fn function_handler(event: LambdaEvent<Value>) -> Result<Value, Error> {
+    let (event_payload, _context) = event.into_parts();
+
+    // Check for S3 batch mode first (direct invocation with s3Input/s3Output)
+    if event_payload.get("s3Input").is_some() && event_payload.get("s3Output").is_some() {
+        // S3 batch mode - read from S3, process, write to S3
+        let s3_input: S3BatchInput = serde_json::from_value(event_payload)
+            .map_err(|e| Error::from(format!("Invalid S3 batch input: {}", e)))?;
+
+        match process_s3_batch(s3_input).await {
+            Ok(summary) => {
+                return Ok(serde_json::to_value(summary)?);
+            }
+            Err(e) => {
+                let error_response = serde_json::json!({
+                    "status": "error",
+                    "error": e
+                });
+                return Ok(error_response);
+            }
+        }
+    }
+
+    // Check if this is an API Gateway event (has "body" field) or direct invocation
+    let payload: Value = if let Some(body) = event_payload.get("body") {
+        // API Gateway Lambda Proxy - body is a JSON string
+        if let Some(body_str) = body.as_str() {
+            match serde_json::from_str(body_str) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    let response = ApiGatewayResponse::error(400, &format!("Invalid JSON body: {}", e));
+                    return Ok(serde_json::to_value(response)?);
+                }
+            }
+        } else if body.is_null() {
+            // Empty body
+            let response = ApiGatewayResponse::error(400, "Request body is required");
+            return Ok(serde_json::to_value(response)?);
+        } else {
+            // Body is already parsed (shouldn't happen with proxy integration)
+            body.clone()
+        }
+    } else {
+        // Direct Lambda invocation - payload is the input itself
+        event_payload
+    };
+
+    // Check for request with overrides structure: { "overrides": {...}, "inputs": [...] }
+    // Or support legacy formats: array of inputs or single input
+    let (overrides, inputs): (OverrideInput, Vec<Value>) = if payload.get("inputs").is_some() {
+        // New format with overrides
+        match serde_json::from_value::<RequestWithOverrides>(payload.clone()) {
+            Ok(req) => (req.overrides, req.inputs),
+            Err(e) => {
+                let response = ApiGatewayResponse::error(400, &format!("Invalid request format: {}", e));
+                return Ok(serde_json::to_value(response)?);
+            }
+        }
+    } else if payload.is_array() {
+        // Legacy: Array of inputs without overrides
+        (OverrideInput::default(), payload.as_array().unwrap().clone())
+    } else {
+        // Legacy: Single input without overrides
+        (OverrideInput::default(), vec![payload])
+    };
+
+    // Process all inputs with the same overrides
+    let results: Vec<BatchResult> = inputs.iter()
+        .map(|input| process_single_input(input.clone(), &overrides))
+        .collect();
+
+    let response_body = BatchResponse { results };
+    let body_json = serde_json::to_string(&response_body)?;
+
+    // Return API Gateway response format
+    let api_response = ApiGatewayResponse::success(&body_json);
+    Ok(serde_json::to_value(api_response)?)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .without_time()
+        .init();
+
+    // Initialize globals at cold start (no data loading - just client setup)
+    let factors_table_name = env::var("FACTORS_TABLE").expect("FACTORS_TABLE environment variable not set");
+    let scenario = env::var("SCENARIO").expect("SCENARIO environment variable not set");
+
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
+    let db_client = DynamoDbClient::new(&config);
+    let s3_client = S3Client::new(&config);
+
+    let _ = DB_CLIENT.set(db_client);
+    let _ = S3_CLIENT.set(s3_client);
+    let _ = FACTORS_TABLE_NAME.set(factors_table_name);
+    let _ = SCENARIO.set(scenario.clone());
+
+    tracing::info!("Initialized DynamoDB and S3 clients for scenario: {}", scenario);
+
+    lambda_runtime::run(service_fn(function_handler)).await
+}

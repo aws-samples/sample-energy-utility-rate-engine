@@ -1,0 +1,512 @@
+[
+  {
+    "name": "DEBUG_LOG",
+    "signature": "DEBUG_LOG(label, value)",
+    "description": "Logs a label and numeric value to stdout for debugging. Returns the value unchanged.",
+    "parameters": [
+      {
+        "name": "label",
+        "type": "string",
+        "description": "A label to identify the log entry"
+      },
+      {
+        "name": "value",
+        "type": "f64",
+        "description": "The value to log"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The same value passed in (for chaining)"
+    },
+    "example": "charge = DEBUG_LOG(\"customer_charge\", customer_charge)",
+    "rustCode": "fn debug_log(label: &str, value: f64) -> f64 {\n    tracing::info!(\"DEBUG: {} = {}\", label, value);\n    value\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "GET_FACTOR",
+    "signature": "GET_FACTOR(key1, key2, key3, key4, key5, date)",
+    "description": "Retrieves a factor value by up to 5 keys, effective on the given date",
+    "parameters": [
+      {
+        "name": "key1",
+        "type": "string",
+        "description": "First key for factor lookup (required)"
+      },
+      {
+        "name": "key2",
+        "type": "string",
+        "description": "Second key for factor lookup (optional)"
+      },
+      {
+        "name": "key3",
+        "type": "string",
+        "description": "Third key for factor lookup (optional)"
+      },
+      {
+        "name": "key4",
+        "type": "string",
+        "description": "Fourth key for factor lookup (optional)"
+      },
+      {
+        "name": "key5",
+        "type": "string",
+        "description": "Fifth key for factor lookup (optional)"
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "description": "The effective date to use for lookup"
+      }
+    ],
+    "returns": {
+      "type": "Decimal",
+      "description": "The factor value for the specified keys on the given date"
+    },
+    "example": "customer_charge = GET_FACTOR(INPUT.RATE, \"CUSTOMER_CHARGE\", \"\", \"\", \"\", INPUT.BILL_DATE)",
+    "rustCode": "fn get_factor(key1: &str, key2: &str, key3: &str, key4: &str, key5: &str, date: &str) -> f64 {\n    // Ensure cache is loaded on first call\n    load_factor_cache_once();\n\n    // Build the lookup key from non-empty components\n    let parts: Vec<&str> = vec![key1, key2, key3, key4, key5]\n        .into_iter()\n        .filter(|s| !s.is_empty())\n        .collect();\n    let lookup_key = parts.join(\"#\");\n\n    // O(1) HashMap lookup by key, then small scan for date range\n    let result = FACTOR_CACHE.with(|cache| {\n        cache.borrow()\n            .get(&lookup_key)\n            .and_then(|entries| {\n                entries.iter()\n                    .find(|f| date >= f.start_date.as_str() && date <= f.end_date.as_str())\n                    .map(|f| f.value)\n            })\n            .unwrap_or_else(|| {\n                tracing::warn!(\"Factor not found: {} for date {}\", lookup_key, date);\n                0.0\n            })\n    });\n\n    result\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "ROUND_CENTS",
+    "signature": "ROUND_CENTS(amount, rule)",
+    "description": "Rounds a monetary amount to cents using the specified rounding rule. Supports utility-specific rounding conventions.",
+    "parameters": [
+      {
+        "name": "amount",
+        "type": "f64",
+        "description": "The amount to round"
+      },
+      {
+        "name": "rule",
+        "type": "string",
+        "description": "The rounding rule: 'HALF_UP', 'HALF_DOWN', 'UP', 'DOWN', 'BANKERS'"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The rounded amount in cents (2 decimal places)"
+    },
+    "example": "final_amount = ROUND_CENTS(total, \"HALF_UP\")",
+    "rustCode": "fn round_cents(amount: f64, rule: &str) -> f64 {\n    let scaled = amount * 100.0;\n    let rounded = match rule {\n        \"HALF_UP\" => scaled.round(),\n        \"HALF_DOWN\" => {\n            let frac = scaled.fract().abs();\n            if frac == 0.5 { scaled.trunc() } else { scaled.round() }\n        },\n        \"UP\" => scaled.ceil(),\n        \"DOWN\" => scaled.floor(),\n        \"BANKERS\" => {\n            let frac = scaled.fract().abs();\n            if frac == 0.5 {\n                let trunc = scaled.trunc();\n                if trunc as i64 % 2 == 0 { trunc } else { trunc + scaled.signum() }\n            } else { scaled.round() }\n        },\n        _ => scaled.round()\n    };\n    rounded / 100.0\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "MAX",
+    "signature": "MAX(a, b)",
+    "description": "Returns the maximum of two values. Commonly used for minimum bill enforcement.",
+    "parameters": [
+      {
+        "name": "a",
+        "type": "f64",
+        "description": "First value to compare"
+      },
+      {
+        "name": "b",
+        "type": "f64",
+        "description": "Second value to compare"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The larger of the two values"
+    },
+    "example": "total = MAX(calculated_bill, minimum_bill)",
+    "rustCode": "fn max_f64(a: f64, b: f64) -> f64 {\n    if a > b { a } else { b }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "MIN",
+    "signature": "MIN(a, b)",
+    "description": "Returns the minimum of two values. Useful for caps and limits.",
+    "parameters": [
+      {
+        "name": "a",
+        "type": "f64",
+        "description": "First value to compare"
+      },
+      {
+        "name": "b",
+        "type": "f64",
+        "description": "Second value to compare"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The smaller of the two values"
+    },
+    "example": "capped_charge = MIN(demand_charge, max_demand_cap)",
+    "rustCode": "fn min_f64(a: f64, b: f64) -> f64 {\n    if a < b { a } else { b }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "GET_SEASON",
+    "signature": "GET_SEASON(date, summer_start, summer_end)",
+    "description": "Determines the billing season (SUMMER/WINTER) from the date and configurable summer month boundaries. Boundaries come from rate factors (not hardcoded), so winter-peaking utilities or any seasonal definition work. Handles wraparound ranges where summer_start > summer_end (e.g., a Nov-Mar summer).",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The billing date in YYYY-MM-DD format"
+      },
+      {
+        "name": "summer_start",
+        "type": "f64",
+        "description": "First month of summer (1-12), e.g., 6 for June"
+      },
+      {
+        "name": "summer_end",
+        "type": "f64",
+        "description": "Last month of summer (1-12), e.g., 9 for September"
+      }
+    ],
+    "returns": {
+      "type": "string",
+      "description": "The season name: 'SUMMER' or 'WINTER'"
+    },
+    "example": "summer_start = GET_FACTOR(INPUT.RATE, \"SUMMER_START_MONTH\", \"\", \"\", \"\", effective_date)\nsummer_end = GET_FACTOR(INPUT.RATE, \"SUMMER_END_MONTH\", \"\", \"\", \"\", effective_date)\nseason = GET_SEASON(INPUT.BILL_DATE, summer_start, summer_end)",
+    "rustCode": "fn get_season(date: &str, summer_start: f64, summer_end: f64) -> String {\n    // Extract month from YYYY-MM-DD date format\n    let month: u32 = date.split('-').nth(1).and_then(|m| m.parse().ok()).unwrap_or(1);\n    let start = summer_start as u32;\n    let end = summer_end as u32;\n    let is_summer = if start <= end {\n        month >= start && month <= end\n    } else {\n        // Wraparound range (e.g., start=11, end=3)\n        month >= start || month <= end\n    };\n    if is_summer { \"SUMMER\".to_string() } else { \"WINTER\".to_string() }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "EXTRACT_MONTH",
+    "signature": "EXTRACT_MONTH(date)",
+    "description": "Extracts the month number (1-12) from a date string.",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The date in YYYY-MM-DD format"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The month number (1-12)"
+    },
+    "example": "month = EXTRACT_MONTH(INPUT.BILL_DATE)",
+    "rustCode": "fn extract_month(date: &str) -> f64 {\n    date.split('-').nth(1).and_then(|m| m.parse::<f64>().ok()).unwrap_or(1.0)\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "CALCULATE_TIERED",
+    "signature": "CALCULATE_TIERED(usage, tier1_limit, tier1_rate, tier2_rate)",
+    "description": "Calculates energy charge using a two-tier rate structure. Usage up to tier1_limit is charged at tier1_rate, remainder at tier2_rate.",
+    "parameters": [
+      {
+        "name": "usage",
+        "type": "f64",
+        "description": "Total energy usage in kWh"
+      },
+      {
+        "name": "tier1_limit",
+        "type": "f64",
+        "description": "Maximum kWh for tier 1 rate"
+      },
+      {
+        "name": "tier1_rate",
+        "type": "f64",
+        "description": "Rate per kWh for tier 1"
+      },
+      {
+        "name": "tier2_rate",
+        "type": "f64",
+        "description": "Rate per kWh for tier 2"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "Total energy charge"
+    },
+    "example": "energy_charge = CALCULATE_TIERED(INPUT.KWH, 1000, 0.10, 0.12)",
+    "rustCode": "fn calculate_tiered(usage: f64, tier1_limit: f64, tier1_rate: f64, tier2_rate: f64) -> f64 {\n    if usage <= tier1_limit {\n        usage * tier1_rate\n    } else {\n        (tier1_limit * tier1_rate) + ((usage - tier1_limit) * tier2_rate)\n    }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "ABS",
+    "signature": "ABS(value)",
+    "description": "Returns the absolute value of a number. Useful for credit calculations.",
+    "parameters": [
+      {
+        "name": "value",
+        "type": "f64",
+        "description": "The value to get absolute value of"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The absolute value"
+    },
+    "example": "credit_amount = ABS(net_export)",
+    "rustCode": "fn abs_f64(value: f64) -> f64 {\n    value.abs()\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "ROUND",
+    "signature": "ROUND(value, decimals)",
+    "description": "Rounds a number to the specified number of decimal places using standard rounding (half up)",
+    "parameters": [
+      {
+        "name": "value",
+        "type": "f64",
+        "description": "The value to round"
+      },
+      {
+        "name": "decimals",
+        "type": "f64",
+        "description": "Number of decimal places (e.g., 2 for cents)"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The rounded value"
+    },
+    "example": "total = ROUND(total, 2)",
+    "rustCode": "fn round_decimals(value: f64, decimals: f64) -> f64 {\n    let multiplier = 10_f64.powf(decimals);\n    (value * multiplier).round() / multiplier\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "ADD_YEARS",
+    "signature": "ADD_YEARS(date, years)",
+    "description": "Adds the specified number of years to a date. Useful for date offset calculations.",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The date in YYYY-MM-DD format"
+      },
+      {
+        "name": "years",
+        "type": "f64",
+        "description": "Number of years to add (can be negative to subtract)"
+      }
+    ],
+    "returns": {
+      "type": "string",
+      "description": "The new date in YYYY-MM-DD format"
+    },
+    "example": "future_date = ADD_YEARS(INPUT.BILL_DATE, 1)",
+    "rustCode": "fn add_years(date: &str, years: f64) -> String {\n    use chrono::{NaiveDate, Datelike};\n    match NaiveDate::parse_from_str(date, \"%Y-%m-%d\") {\n        Ok(d) => {\n            let new_year = d.year() + years as i32;\n            NaiveDate::from_ymd_opt(new_year, d.month(), d.day())\n                .or_else(|| NaiveDate::from_ymd_opt(new_year, d.month(), 28))\n                .map(|nd| nd.format(\"%Y-%m-%d\").to_string())\n                .unwrap_or_else(|| date.to_string())\n        }\n        Err(_) => date.to_string(),\n    }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "ADD_MONTHS",
+    "signature": "ADD_MONTHS(date, months)",
+    "description": "Adds the specified number of months to a date. Handles year rollover automatically.",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The date in YYYY-MM-DD format"
+      },
+      {
+        "name": "months",
+        "type": "f64",
+        "description": "Number of months to add (can be negative to subtract)"
+      }
+    ],
+    "returns": {
+      "type": "string",
+      "description": "The new date in YYYY-MM-DD format"
+    },
+    "example": "next_month = ADD_MONTHS(INPUT.BILL_DATE, 1)",
+    "rustCode": "fn add_months(date: &str, months: f64) -> String {\n    use chrono::{NaiveDate, Datelike};\n    match NaiveDate::parse_from_str(date, \"%Y-%m-%d\") {\n        Ok(d) => {\n            let total = (d.year() as i32) * 12 + (d.month() as i32 - 1) + months as i32;\n            let new_year = total.div_euclid(12);\n            let new_month = (total.rem_euclid(12) + 1) as u32;\n            NaiveDate::from_ymd_opt(new_year, new_month, d.day())\n                .or_else(|| NaiveDate::from_ymd_opt(new_year, new_month, 28))\n                .map(|nd| nd.format(\"%Y-%m-%d\").to_string())\n                .unwrap_or_else(|| date.to_string())\n        }\n        Err(_) => date.to_string(),\n    }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "CALCULATE_TIERED_N",
+    "signature": "CALCULATE_TIERED_N(usage, tiers_json)",
+    "description": "Calculates charge using N-tier rate structure. Tiers are loaded from a factor as JSON array of {limit, rate} objects. Handles 1 to unlimited tiers.",
+    "parameters": [
+      {
+        "name": "usage",
+        "type": "f64",
+        "description": "Total usage quantity"
+      },
+      {
+        "name": "tiers_json",
+        "type": "string",
+        "description": "JSON array of tier objects: [{\"limit\":500,\"rate\":0.05},{\"limit\":1000,\"rate\":0.08},{\"limit\":0,\"rate\":0.12}]. Last tier limit=0 means unlimited."
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "Total charge across all tiers"
+    },
+    "example": "tiers = GET_FACTOR(INPUT.RATE, \"ENERGY_TIERS\", \"\", \"\", \"\", INPUT.BILL_DATE)\nenergy_charge = CALCULATE_TIERED_N(INPUT.KWH, tiers)",
+    "rustCode": "fn calculate_tiered_n(usage: f64, tiers_json: &str) -> f64 {\n    // Parse tiers from JSON string: [{\"limit\":500,\"rate\":0.05},{\"limit\":1000,\"rate\":0.08},{\"limit\":0,\"rate\":0.12}]\n    let tiers: Vec<serde_json::Value> = serde_json::from_str(tiers_json).unwrap_or_default();\n    let mut remaining = usage;\n    let mut total = 0.0;\n    let mut prev_limit = 0.0;\n\n    for tier in &tiers {\n        if remaining <= 0.0 { break; }\n        let limit = tier[\"limit\"].as_f64().unwrap_or(0.0);\n        let rate = tier[\"rate\"].as_f64().unwrap_or(0.0);\n        let tier_usage = if limit == 0.0 {\n            remaining  // Last tier: unlimited\n        } else {\n            let tier_size = limit - prev_limit;\n            if remaining > tier_size { tier_size } else { remaining }\n        };\n        total += tier_usage * rate;\n        remaining -= tier_usage;\n        prev_limit = limit;\n    }\n    total\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "GET_TOU_PERIOD",
+    "signature": "GET_TOU_PERIOD(datetime, schedule_json)",
+    "description": "Determines the time-of-use period from a datetime and TOU schedule. Returns period name like ON_PEAK, OFF_PEAK, SHOULDER.",
+    "parameters": [
+      {
+        "name": "datetime",
+        "type": "string",
+        "description": "Datetime in YYYY-MM-DD HH:MM format or just HH:MM for hour extraction"
+      },
+      {
+        "name": "schedule_json",
+        "type": "string",
+        "description": "JSON TOU schedule: [{\"period\":\"ON_PEAK\",\"start\":14,\"end\":19},{\"period\":\"SHOULDER\",\"start\":10,\"end\":14},{\"period\":\"OFF_PEAK\",\"start\":0,\"end\":10}]"
+      }
+    ],
+    "returns": {
+      "type": "string",
+      "description": "TOU period name (e.g., ON_PEAK, OFF_PEAK, SHOULDER)"
+    },
+    "example": "tou_schedule = GET_FACTOR(INPUT.RATE, \"TOU_SCHEDULE\", season, \"\", \"\", INPUT.BILL_DATE)\nperiod = GET_TOU_PERIOD(INPUT.USAGE_HOUR, tou_schedule)",
+    "rustCode": "fn get_tou_period(datetime: &str, schedule_json: &str) -> String {\n    // Extract hour from datetime (supports \"YYYY-MM-DD HH:MM\" or just \"HH\" or \"HH:MM\")\n    let hour: u32 = if datetime.contains(' ') {\n        datetime.split(' ').nth(1).and_then(|t| t.split(':').next()).and_then(|h| h.parse().ok()).unwrap_or(0)\n    } else if datetime.contains(':') {\n        datetime.split(':').next().and_then(|h| h.parse().ok()).unwrap_or(0)\n    } else {\n        datetime.parse().unwrap_or(0)\n    };\n    let periods: Vec<serde_json::Value> = serde_json::from_str(schedule_json).unwrap_or_default();\n    for p in &periods {\n        let start = p[\"start\"].as_u64().unwrap_or(0) as u32;\n        let end = p[\"end\"].as_u64().unwrap_or(24) as u32;\n        if (start <= end && hour >= start && hour < end) || (start > end && (hour >= start || hour < end)) {\n            return p[\"period\"].as_str().unwrap_or(\"OFF_PEAK\").to_string();\n        }\n    }\n    \"OFF_PEAK\".to_string()\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "CLAMP",
+    "signature": "CLAMP(value, min_val, max_val)",
+    "description": "Constrains a value between a minimum and maximum. Used for rate caps, floors, and demand charge limits.",
+    "parameters": [
+      {
+        "name": "value",
+        "type": "f64",
+        "description": "The value to constrain"
+      },
+      {
+        "name": "min_val",
+        "type": "f64",
+        "description": "Minimum allowed value (floor)"
+      },
+      {
+        "name": "max_val",
+        "type": "f64",
+        "description": "Maximum allowed value (cap)"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "The clamped value"
+    },
+    "example": "demand_charge = CLAMP(raw_demand * demand_rate, min_demand_charge, max_demand_charge)",
+    "rustCode": "fn clamp_f64(value: f64, min_val: f64, max_val: f64) -> f64 {\n    if value < min_val { min_val } else if value > max_val { max_val } else { value }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "CALCULATE_RATCHET",
+    "signature": "CALCULATE_RATCHET(current_demand, history_json, ratchet_pct)",
+    "description": "Computes billing demand under a demand-ratchet clause: the greater of the current period's demand and a percentage of the highest demand over a trailing window. All prior peaks are passed in as a JSON array (stateless — the engine performs no historical lookups). Common for commercial/industrial tariffs outside Florida.",
+    "parameters": [
+      {
+        "name": "current_demand",
+        "type": "f64",
+        "description": "Current billing period peak demand (kW)"
+      },
+      {
+        "name": "history_json",
+        "type": "string",
+        "description": "JSON array of prior-period peak demands, e.g. \"[120.0, 135.5, 110.0]\". Empty array means no ratchet floor applies."
+      },
+      {
+        "name": "ratchet_pct",
+        "type": "f64",
+        "description": "Ratchet percentage as a decimal (e.g., 0.80 for an 80% ratchet)"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "Billing demand (kW): max(current_demand, ratchet_pct * max(history))"
+    },
+    "example": "billing_demand = CALCULATE_RATCHET(INPUT.KWD, INPUT.KWD_HISTORY, 0.80)",
+    "rustCode": "fn calculate_ratchet(current_demand: f64, history_json: &str, ratchet_pct: f64) -> f64 {\n    let history: Vec<f64> = serde_json::from_str(history_json).unwrap_or_default();\n    let peak_history = history.iter().cloned().fold(0.0_f64, f64::max);\n    let ratchet_floor = peak_history * ratchet_pct;\n    if current_demand > ratchet_floor { current_demand } else { ratchet_floor }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "POWER_FACTOR_ADJ",
+    "signature": "POWER_FACTOR_ADJ(demand_charge, actual_pf, target_pf)",
+    "description": "Applies a power-factor adjustment to a demand charge. When the customer's actual power factor is below the target, the demand charge is scaled up proportionally (target/actual); at or above target there is no penalty. Power factor is supplied at calculation time (stateless). Common in commercial/industrial tariffs.",
+    "parameters": [
+      {
+        "name": "demand_charge",
+        "type": "f64",
+        "description": "The computed demand charge before adjustment"
+      },
+      {
+        "name": "actual_pf",
+        "type": "f64",
+        "description": "Customer's actual power factor (0.0-1.0, e.g., 0.85)"
+      },
+      {
+        "name": "target_pf",
+        "type": "f64",
+        "description": "Tariff target power factor (0.0-1.0, e.g., 0.95)"
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "Adjusted demand charge (increased when actual_pf < target_pf)"
+    },
+    "example": "demand_charge = POWER_FACTOR_ADJ(demand_charge, INPUT.POWER_FACTOR, target_pf)",
+    "rustCode": "fn power_factor_adj(demand_charge: f64, actual_pf: f64, target_pf: f64) -> f64 {\n    // No adjustment for missing/invalid PF or when at/above target\n    if actual_pf <= 0.0 || target_pf <= 0.0 || actual_pf >= target_pf {\n        demand_charge\n    } else {\n        demand_charge * (target_pf / actual_pf)\n    }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "IS_EVENT_DAY",
+    "signature": "IS_EVENT_DAY(date, events_json)",
+    "description": "Returns 1.0 if the billing date is a declared critical-peak / event day, else 0.0. Event dates are passed in as a JSON array of YYYY-MM-DD strings (stateless — no event-calendar lookup). Used for Critical Peak Pricing (CPP) adders.",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The date to test, in YYYY-MM-DD format"
+      },
+      {
+        "name": "events_json",
+        "type": "string",
+        "description": "JSON array of event dates, e.g. \"[\\\"2025-07-18\\\",\\\"2025-08-02\\\"]\""
+      }
+    ],
+    "returns": {
+      "type": "f64",
+      "description": "1.0 if date is an event day, 0.0 otherwise"
+    },
+    "example": "is_cpp = IS_EVENT_DAY(INPUT.BILL_DATE, INPUT.EVENT_DATES)",
+    "rustCode": "fn is_event_day(date: &str, events_json: &str) -> f64 {\n    let events: Vec<String> = serde_json::from_str(events_json).unwrap_or_default();\n    if events.iter().any(|e| e == date) { 1.0 } else { 0.0 }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  },
+  {
+    "name": "GET_DAY_TYPE",
+    "signature": "GET_DAY_TYPE(date)",
+    "description": "Returns the day type (WEEKDAY or WEEKEND) for a date. Useful for TOU schedules that differ on weekends. Pure function of the date.",
+    "parameters": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "The date in YYYY-MM-DD format"
+      }
+    ],
+    "returns": {
+      "type": "string",
+      "description": "'WEEKDAY' (Mon-Fri) or 'WEEKEND' (Sat-Sun)"
+    },
+    "example": "day_type = GET_DAY_TYPE(INPUT.BILL_DATE)",
+    "rustCode": "fn get_day_type(date: &str) -> String {\n    use chrono::{NaiveDate, Datelike, Weekday};\n    match NaiveDate::parse_from_str(date, \"%Y-%m-%d\") {\n        Ok(d) => match d.weekday() {\n            Weekday::Sat | Weekday::Sun => \"WEEKEND\".to_string(),\n            _ => \"WEEKDAY\".to_string(),\n        },\n        Err(_) => \"WEEKDAY\".to_string(),\n    }\n}",
+    "createdBy": "admin",
+    "updatedBy": "admin"
+  }
+]
